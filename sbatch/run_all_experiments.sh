@@ -78,19 +78,19 @@ get_job_config() {
             ;;
         "gemma-2b")
             # ~2B params
-            gpu_type="nvidia_h100_80gb_hbm3_4g.40gb:1"
+            gpu_type="nvidia_h100_80gb_hbm3_3g.40gb:1"
             mem="32000M"
             base_time_min=50
             ;;
         "llama-7b")
             # ~7B params, needs full GPU
-            gpu_type="nvidia_h100_80gb_hbm3:1"
+            gpu_type="h100:1"
             mem="64000M"
             base_time_min=120
             ;;
         *)
             # Default fallback
-            gpu_type="nvidia_h100_80gb_hbm3_4g.40gb:1"
+            gpu_type="nvidia_h100_80gb_hbm3_3g.40gb:1"
             mem="32000M"
             base_time_min=60
             ;;
