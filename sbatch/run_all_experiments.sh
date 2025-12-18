@@ -24,20 +24,20 @@
 # ============================================================================
 
 # Models - one representative per size category
-all_models=("qwen-0.5b") # "opt-1.3b" "gemma-2b" "llama-7b")
+all_models=("qwen-0.5b" "opt-1.3b" "gemma-2b" "llama-7b")
 
 # Techniques
 sparse_techniques=("sparsegpt" "wanda" "prism")
 all_techniques=("fp16" "sinq" "sparsegpt" "wanda" "prism")
 
 # Precisions (3-8 bits)
-precisions=("3" "4" "5") # "6" "7" "8")
+precisions=("3" "4" "5")
 
 # Sparsity levels (5%, 25%, 50%)
 sparsities=("0.05" "0.25" "0.50")
 
 # Datasets
-all_datasets=("wikitext2" "ptb") # "c4" "mmlu")
+all_datasets=("wikitext2" "ptb" "c4" "mmlu")
 
 # Job counter
 job_count=0
