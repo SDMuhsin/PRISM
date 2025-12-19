@@ -25,7 +25,7 @@
 MODEL="qwen-0.5b"
 
 # Sparsity levels: 5% to 95% in steps of 5%
-sparsities=("0.05" "0.10" "0.15" "0.20" "0.25" "0.30" "0.35" "0.40" "0.45" "0.50" "0.55" "0.60" "0.65" "0.70" "0.75" "0.80" "0.85" "0.90" "0.95")
+sparsities=("0.55" "0.60" "0.65" "0.70" "0.75" "0.80" "0.85" "0.90" "0.95") # ("0.05" "0.10" "0.15" "0.20" "0.25" "0.30" "0.35" "0.40" "0.45" "0.50" 
 
 # Precisions for quantized methods
 precisions=("3" "5")
@@ -147,7 +147,7 @@ echo "Section 1: Wanda (Pruning Only)"
 echo "=============================================="
 
 for sparsity in "${sparsities[@]}"; do
-    submit_job "wanda" "0" "$sparsity"
+    #submit_job "wanda" "0" "$sparsity"
 done
 
 # ============================================================================
@@ -160,7 +160,7 @@ echo "=============================================="
 
 for precision in "${precisions[@]}"; do
     for sparsity in "${sparsities[@]}"; do
-        submit_job "sparsegpt" "$precision" "$sparsity"
+        #submit_job "sparsegpt" "$precision" "$sparsity"
     done
 done
 
