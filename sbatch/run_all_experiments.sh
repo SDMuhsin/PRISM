@@ -175,6 +175,14 @@ submit_job() {
             module load scipy-stack cuda cudnn
             module load arrow
             source ./env/bin/activate
+
+            # Shared cache for HuggingFace (datasets & models)
+            # HF uses file locking for concurrent download safety
+            export HF_HOME=\$(pwd)/cache
+            export HF_DATASETS_CACHE=\$(pwd)/cache/datasets
+            export TRANSFORMERS_CACHE=\$(pwd)/cache/transformers
+            mkdir -p \$HF_HOME \$HF_DATASETS_CACHE \$TRANSFORMERS_CACHE
+
             echo '========================================'
             echo 'Job: $job_name'
             echo 'Model: $model'
@@ -182,6 +190,7 @@ submit_job() {
             echo 'Precision: ${precision}-bit'
             echo 'Sparsity: $sparsity'
             echo 'Dataset: $dataset'
+            echo 'Cache: '\$HF_HOME
             echo 'Started: '\$(date)
             echo '========================================'
             nvidia-smi
