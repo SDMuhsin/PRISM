@@ -148,6 +148,7 @@ echo "=============================================="
 
 for sparsity in "${sparsities[@]}"; do
     #submit_job "wanda" "0" "$sparsity"
+    echo "Wanda Loop"
 done
 
 # ============================================================================
@@ -161,6 +162,7 @@ echo "=============================================="
 for precision in "${precisions[@]}"; do
     for sparsity in "${sparsities[@]}"; do
         #submit_job "sparsegpt" "$precision" "$sparsity"
+	echo "SparseGPT Loop"
     done
 done
 
