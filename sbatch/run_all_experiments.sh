@@ -24,7 +24,7 @@
 # ============================================================================
 
 # Models - one representative per size category
-all_models=("qwen-0.5b" "opt-1.3b" "gemma-2b" "llama-7b")
+all_models=("llama-7b") # "qwen-0.5b" "opt-1.3b" "gemma-2b" 
 
 # Techniques
 sparse_techniques=("sparsegpt" "wanda" "prism")
