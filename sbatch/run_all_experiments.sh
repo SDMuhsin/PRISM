@@ -27,22 +27,22 @@
 # ============================================================================
 
 # Output CSV filename (results saved to ./results/${OUTPUT_FILE})
-OUTPUT_FILE="${OUTPUT_FILE:-rerun_wikitext_prism_opt.csv}"
+OUTPUT_FILE="${OUTPUT_FILE:-rerun_c4.csv}"
 
 # Models to run
-models=("opt-1.3b")
+models=("qwen-0.5b")
 
 # Techniques to run: fp16, sinq, sparsegpt, wanda, prism
 techniques=("prism")
 
 # Precisions (used by sinq, sparsegpt, wanda, prism; ignored by fp16)
-precisions=("3" "4" "5")
+precisions=("3")
 
 # Sparsity levels (used by sparsegpt, wanda, prism; ignored by fp16, sinq)
-sparsities=("0.05" "0.25" "0.50")
+sparsities=("0.50")
 
 # Datasets to evaluate on
-datasets=("wikitext2")
+datasets=("c4")
 
 # ============================================================================
 # END CONFIGURATION
