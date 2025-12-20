@@ -1757,6 +1757,38 @@ def apply_scab_quantization(
     return model
 
 
+def is_prenorm_architecture(model) -> bool:
+    """Detect if model uses pre-norm architecture (LayerNorm before sublayer).
+
+    Pre-norm models (OPT) have unnormalized activations between layers,
+    making Sinkhorn μ factors unreliable. PRISM uses simplified importance
+    weighting for these architectures.
+
+    Returns:
+        True if pre-norm (OPT), False if post-norm (Qwen, LLaMA)
+    """
+    model_type = type(model).__name__.lower()
+
+    # Check model class name
+    if 'opt' in model_type:
+        return True
+
+    # Check config if available
+    if hasattr(model, 'config'):
+        config = model.config
+        # OPT uses do_layer_norm_before=True
+        if hasattr(config, 'do_layer_norm_before') and config.do_layer_norm_before:
+            return True
+        # Some models use normalize_before
+        if hasattr(config, 'normalize_before') and config.normalize_before:
+            return True
+        # Check model_type in config
+        if hasattr(config, 'model_type') and 'opt' in config.model_type.lower():
+            return True
+
+    return False
+
+
 def apply_prism_quantization(
     model,
     calibration_data,
@@ -1771,6 +1803,10 @@ def apply_prism_quantization(
     2. OBS compensation (redistributes pruning error)
     3. Sparse-aware Sinkhorn normalization (computes μ only on non-zero weights)
 
+    Architecture-aware (NEW):
+    - Post-norm (Qwen, LLaMA): Full inverse-μ importance + sparse-aware Sinkhorn
+    - Pre-norm (OPT): Simplified Wanda-style importance + standard Sinkhorn
+
     Empirical results:
     - Beats SparseGPT at sparsity ≤50%
     - 35% sparsity: 24.6% better than SparseGPT
@@ -1779,6 +1815,11 @@ def apply_prism_quantization(
     The sparse-aware normalization provides 3-10% additional improvement
     over standard Sinkhorn normalization (used in SCAB).
     """
+    # Detect architecture type
+    is_prenorm = is_prenorm_architecture(model)
+    if is_prenorm:
+        print(f"  [PRISM] Detected pre-norm architecture - using simplified importance weighting")
+
     # First collect activations
     layer_activations = collect_activations(model, calibration_data, device)
     layer_paths = get_layer_paths(model)
@@ -1808,14 +1849,16 @@ def apply_prism_quantization(
                 activations = activations.to(device)
 
             # Apply PRISM: iterative refinement + OBS + sparse-aware Sinkhorn
+            # Architecture-aware: use simplified importance for pre-norm (OPT)
             W_q, scales, zeros, mask, scale2, meta = sparse_quantize_sinq(
                 W, activations,
                 sparsity=sparsity,
                 nbits=nbits,
-                method='sinq_wanda_inverse',  # Inverse-μ importance
+                method='sinq_wanda_inverse',  # Inverse-μ importance (post-norm only)
                 device=device,
                 use_compensation=True if activations is not None and sparsity > 0 else False,
-                compensation_mode='prism'  # PRISM's sparse-aware Sinkhorn
+                compensation_mode='prism',  # PRISM's sparse-aware Sinkhorn
+                is_prenorm=is_prenorm  # NEW: architecture-aware handling
             )
 
             new_layer = SparseQuantLinear(W_q, scales, zeros, mask, scale2, bias, meta)

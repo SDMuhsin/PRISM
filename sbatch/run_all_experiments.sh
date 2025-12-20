@@ -4,45 +4,52 @@
 # Cluster: fir
 # ============================================================================
 #
-# This script submits all benchmark configurations:
-#   - Techniques: FP16, SINQ, SparseGPT, Wanda, PRISM
-#   - Models: qwen-0.5b (small), opt-1.3b (medium), gemma-2b (large), llama-7b (xlarge)
-#   - Precisions: 3, 4, 5, 6, 7, 8 bits
-#   - Sparsities: 5%, 25%, 50% (for sparse methods)
-#   - Datasets: wikitext2, ptb, c4, mmlu
+# This script submits benchmark configurations based on the arrays below.
+# All execution is controlled by modifying the CONFIGURATION arrays.
+#
+# Techniques:
+#   - fp16:      FP16 baseline (no quantization, no sparsity)
+#   - sinq:      Quantization only (no sparsity)
+#   - sparsegpt: Sparse + Quantization
+#   - wanda:     Sparse + Quantization
+#   - prism:     Sparse-Aware Pruning + Quantization
 #
 # Usage:
-#   chmod +x sbatch/run_all_experiments.sh
-#   ./sbatch/run_all_experiments.sh
+#   ./sbatch/run_all_experiments.sh                              # uses config below
+#   OUTPUT_FILE=my_results.csv ./sbatch/run_all_experiments.sh   # custom output
 #
 # ============================================================================
 
 # Note: Don't use 'set -e' - it breaks ((job_count++)) when count is 0
 
 # ============================================================================
-# CONFIGURATION
+# CONFIGURATION - Modify these arrays to control what runs
 # ============================================================================
 
-# Models - one representative per size category
-all_models=("llama-7b") # "qwen-0.5b" "opt-1.3b" "gemma-2b" 
+# Output CSV filename (results saved to ./results/${OUTPUT_FILE})
+OUTPUT_FILE="${OUTPUT_FILE:-rerun_wikitext_prism_opt.csv}"
 
-# Techniques
-sparse_techniques=("sparsegpt" "wanda" "prism")
-all_techniques=("fp16" "sinq" "sparsegpt" "wanda" "prism")
+# Models to run
+models=("opt-1.3b")
 
-# Precisions (3-8 bits)
+# Techniques to run: fp16, sinq, sparsegpt, wanda, prism
+techniques=("prism")
+
+# Precisions (used by sinq, sparsegpt, wanda, prism; ignored by fp16)
 precisions=("3" "4" "5")
 
-# Sparsity levels (5%, 25%, 50%)
+# Sparsity levels (used by sparsegpt, wanda, prism; ignored by fp16, sinq)
 sparsities=("0.05" "0.25" "0.50")
 
-# Datasets
-all_datasets=("wikitext2" "ptb" "c4" "mmlu")
+# Datasets to evaluate on
+datasets=("wikitext2")
+
+# ============================================================================
+# END CONFIGURATION
+# ============================================================================
 
 # Job counter
 job_count=0
-
-# Working directory
 
 # Create directories
 mkdir -p ./logs ./results
@@ -154,9 +161,9 @@ submit_job() {
 
     # Build python command
     if [[ -n "$sparsity" ]]; then
-        python_cmd="python benchmarks/benchmark_suite.py --model $model --technique $technique --precision $precision --sparsity $sparsity --dataset $dataset --quiet"
+        python_cmd="python benchmarks/benchmark_suite.py --model $model --technique $technique --precision $precision --sparsity $sparsity --dataset $dataset --csv $OUTPUT_FILE --quiet"
     else
-        python_cmd="python benchmarks/benchmark_suite.py --model $model --technique $technique --precision $precision --dataset $dataset --quiet"
+        python_cmd="python benchmarks/benchmark_suite.py --model $model --technique $technique --precision $precision --dataset $dataset --csv $OUTPUT_FILE --quiet"
     fi
 
     echo "  $job_name [GPU: ${gpu_type%%:*}, Mem: $mem, Time: $time_limit]"
@@ -204,6 +211,32 @@ submit_job() {
     ((job_count++))
 }
 
+# Check if a technique requires sparsity
+requires_sparsity() {
+    local technique=$1
+    case $technique in
+        "sparsegpt"|"wanda"|"prism")
+            return 0  # true - requires sparsity
+            ;;
+        *)
+            return 1  # false - no sparsity
+            ;;
+    esac
+}
+
+# Check if a technique requires precision loop
+requires_precision() {
+    local technique=$1
+    case $technique in
+        "fp16")
+            return 1  # false - fixed at 16-bit
+            ;;
+        *)
+            return 0  # true - needs precision
+            ;;
+    esac
+}
+
 # ============================================================================
 # MAIN EXECUTION
 # ============================================================================
@@ -212,116 +245,78 @@ echo "==========================================================================
 echo "SINQ Comprehensive Experiment Suite"
 echo "============================================================================"
 echo "Cluster: fir"
-echo "Models: ${all_models[*]}"
-echo "Techniques: ${all_techniques[*]}"
+echo "Output: ./results/${OUTPUT_FILE}"
+echo "Models: ${models[*]}"
+echo "Techniques: ${techniques[*]}"
 echo "Precisions: ${precisions[*]}"
 echo "Sparsities: ${sparsities[*]} (for sparse methods)"
-echo "Datasets: ${all_datasets[*]}"
+echo "Datasets: ${datasets[*]}"
 echo "============================================================================"
 echo ""
 
-# ============================================================================
-# SECTION 1: FP16 BASELINE JOBS
-# ============================================================================
-echo "=============================================="
-echo "Section 1: FP16 Baseline Jobs"
-echo "=============================================="
+# Iterate through all combinations based on technique type
+for technique in "${techniques[@]}"; do
+    echo "=============================================="
+    echo "Submitting: ${technique^^} jobs"
+    echo "=============================================="
 
-for model in "${all_models[@]}"; do
-    for dataset in "${all_datasets[@]}"; do
-        submit_job "$model" "fp16" "16" "" "$dataset"
-    done
-done
+    for model in "${models[@]}"; do
+        for dataset in "${datasets[@]}"; do
 
-# ============================================================================
-# SECTION 2: SINQ JOBS (Quantization Only - No Sparsity)
-# ============================================================================
-echo ""
-echo "=============================================="
-echo "Section 2: SINQ Jobs (Quantization Only)"
-echo "=============================================="
+            if [[ "$technique" == "fp16" ]]; then
+                # FP16: no precision loop, no sparsity
+                submit_job "$model" "fp16" "16" "" "$dataset"
 
-for model in "${all_models[@]}"; do
-    for precision in "${precisions[@]}"; do
-        for dataset in "${all_datasets[@]}"; do
-            submit_job "$model" "sinq" "$precision" "" "$dataset"
+            elif ! requires_sparsity "$technique"; then
+                # SINQ: precision loop, no sparsity
+                for precision in "${precisions[@]}"; do
+                    submit_job "$model" "$technique" "$precision" "" "$dataset"
+                done
+
+            else
+                # Sparse methods: precision and sparsity loops
+                for precision in "${precisions[@]}"; do
+                    for sparsity in "${sparsities[@]}"; do
+                        submit_job "$model" "$technique" "$precision" "$sparsity" "$dataset"
+                    done
+                done
+            fi
+
         done
     done
-done
-
-# ============================================================================
-# SECTION 3: SPARSEGPT JOBS (Sparse + Quantization)
-# ============================================================================
-echo ""
-echo "=============================================="
-echo "Section 3: SparseGPT Jobs"
-echo "=============================================="
-
-for model in "${all_models[@]}"; do
-    for precision in "${precisions[@]}"; do
-        for sparsity in "${sparsities[@]}"; do
-            for dataset in "${all_datasets[@]}"; do
-                submit_job "$model" "sparsegpt" "$precision" "$sparsity" "$dataset"
-            done
-        done
-    done
-done
-
-# ============================================================================
-# SECTION 4: WANDA JOBS (Sparse + Quantization)
-# ============================================================================
-echo ""
-echo "=============================================="
-echo "Section 4: Wanda Jobs"
-echo "=============================================="
-
-for model in "${all_models[@]}"; do
-    for precision in "${precisions[@]}"; do
-        for sparsity in "${sparsities[@]}"; do
-            for dataset in "${all_datasets[@]}"; do
-                submit_job "$model" "wanda" "$precision" "$sparsity" "$dataset"
-            done
-        done
-    done
-done
-
-# ============================================================================
-# SECTION 5: PRISM JOBS (Sparse-Aware Pruning + Quantization)
-# ============================================================================
-echo ""
-echo "=============================================="
-echo "Section 5: PRISM Jobs (Sparse-Aware)"
-echo "=============================================="
-
-for model in "${all_models[@]}"; do
-    for precision in "${precisions[@]}"; do
-        for sparsity in "${sparsities[@]}"; do
-            for dataset in "${all_datasets[@]}"; do
-                submit_job "$model" "prism" "$precision" "$sparsity" "$dataset"
-            done
-        done
-    done
+    echo ""
 done
 
 # ============================================================================
 # SUMMARY
 # ============================================================================
-echo ""
+
 echo "============================================================================"
 echo "SUBMISSION COMPLETE"
 echo "============================================================================"
 echo "Total jobs submitted: $job_count"
 echo ""
-echo "Job breakdown:"
-n_models=${#all_models[@]}
+
+# Calculate breakdown dynamically
+n_models=${#models[@]}
 n_prec=${#precisions[@]}
 n_sparse=${#sparsities[@]}
-n_data=${#all_datasets[@]}
-echo "  - FP16:      $n_models models x $n_data datasets = $((n_models * n_data)) jobs"
-echo "  - SINQ:      $n_models models x $n_prec precisions x $n_data datasets = $((n_models * n_prec * n_data)) jobs"
-echo "  - SparseGPT: $n_models models x $n_prec prec x $n_sparse sparsities x $n_data datasets = $((n_models * n_prec * n_sparse * n_data)) jobs"
-echo "  - Wanda:     $n_models models x $n_prec prec x $n_sparse sparsities x $n_data datasets = $((n_models * n_prec * n_sparse * n_data)) jobs"
-echo "  - PRISM:     $n_models models x $n_prec prec x $n_sparse sparsities x $n_data datasets = $((n_models * n_prec * n_sparse * n_data)) jobs"
+n_data=${#datasets[@]}
+
+echo "Job breakdown by technique:"
+for technique in "${techniques[@]}"; do
+    if [[ "$technique" == "fp16" ]]; then
+        count=$((n_models * n_data))
+        echo "  - ${technique}: $n_models models x $n_data datasets = $count jobs"
+    elif ! requires_sparsity "$technique"; then
+        count=$((n_models * n_prec * n_data))
+        echo "  - ${technique}: $n_models models x $n_prec precisions x $n_data datasets = $count jobs"
+    else
+        count=$((n_models * n_prec * n_sparse * n_data))
+        echo "  - ${technique}: $n_models models x $n_prec prec x $n_sparse sparsities x $n_data datasets = $count jobs"
+    fi
+done
+
 echo ""
 echo "Resource allocation by model:"
 echo "  - qwen-0.5b: 20GB MIG slice, 16GB mem"
@@ -330,7 +325,7 @@ echo "  - gemma-2b:  40GB MIG slice, 32GB mem"
 echo "  - llama-7b:  Full 80GB H100, 64GB mem"
 echo ""
 echo "Logs: ./logs/"
-echo "Results: ./results/"
+echo "Results: ./results/${OUTPUT_FILE}"
 echo "============================================================================"
 echo "Monitor: squeue -u \$USER"
 echo "Logs:    tail -f ./logs/<job_name>-*.out"

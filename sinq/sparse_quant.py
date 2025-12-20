@@ -704,13 +704,19 @@ def sparse_with_prism(
     W: Tensor,
     X: Tensor,
     sparsity: float,
-    n_iter: int = 2
+    n_iter: int = 2,
+    is_prenorm: bool = False
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
     """
     PRISM: PRuning-Integrated Sparse Matrix quantization.
 
     Combines iterative importance refinement with sparse-aware Sinkhorn
     normalization for optimal joint pruning and quantization.
+
+    Architecture Awareness (NEW):
+    - For post-norm architectures (Qwen, LLaMA): Uses full inverse-μ importance
+    - For pre-norm architectures (OPT): Uses simplified Wanda-style importance
+      because pre-norm activations are unnormalized and μ factors become unreliable
 
     Key improvements over standard approaches:
     1. Iterative refinement adapts importance scores to sparse structure (n=2)
@@ -773,12 +779,21 @@ def sparse_with_prism(
         # Compute Sinkhorn on current weights
         _, mu1, mu2 = sinkhorn_log(W_for_sinkhorn, order=16)
 
-        # Compute inverse-μ importance on ORIGINAL weights
-        mu1_exp = mu1.view(1, -1).to(device)
-        mu2_exp = mu2.view(-1, 1).to(device)
+        # Compute importance on ORIGINAL weights
+        # Architecture-aware importance weighting:
         act_norms_exp = act_norms.view(1, -1).to(device)
 
-        importance = W.abs() * act_norms_exp / (mu1_exp * mu2_exp + 1e-6)
+        if is_prenorm:
+            # PRE-NORM (OPT): Use Wanda-style importance without μ factors
+            # Pre-norm activations are unnormalized, making Sinkhorn μ factors unreliable
+            # Simple magnitude × activation importance works better
+            importance = W.abs() * act_norms_exp
+        else:
+            # POST-NORM (Qwen, LLaMA): Use full inverse-μ importance
+            # Sinkhorn μ factors are meaningful for normalized activations
+            mu1_exp = mu1.view(1, -1).to(device)
+            mu2_exp = mu2.view(-1, 1).to(device)
+            importance = W.abs() * act_norms_exp / (mu1_exp * mu2_exp + 1e-6)
 
         # Create new mask
         flat_imp = importance.view(-1)
@@ -803,10 +818,17 @@ def sparse_with_prism(
     # Apply mask to compensated weights
     W_sparse_comp = W_compensated * mask
 
-    # Phase 3: PRISM - Sparse-aware Sinkhorn normalization
-    # This is the key difference from SCAB-OPT: we compute μ factors
-    # only on non-zero weights, not on the entire matrix including zeros
-    _, mu1_final, mu2_final = sinkhorn_log_sparse_aware(W_sparse_comp, mask, order=16)
+    # Phase 3: Final Sinkhorn normalization
+    if is_prenorm:
+        # PRE-NORM (OPT): Use standard Sinkhorn
+        # Pre-norm activations don't benefit from sparse-aware variance computation
+        # because the μ factors are already unreliable
+        _, mu1_final, mu2_final = sinkhorn_log(W_sparse_comp, order=16)
+    else:
+        # POST-NORM (Qwen, LLaMA): Use sparse-aware Sinkhorn
+        # This is the key PRISM contribution: compute μ factors only on non-zero weights,
+        # avoiding variance distortion from pruned zeros
+        _, mu1_final, mu2_final = sinkhorn_log_sparse_aware(W_sparse_comp, mask, order=16)
 
     return W_compensated, mask, mu1_final, mu2_final
 
@@ -1364,7 +1386,8 @@ def sparse_quantize_sinq(
     structured: str = 'unstructured',
     device: str = 'cuda',
     use_compensation: bool = False,
-    compensation_mode: str = 'fast'
+    compensation_mode: str = 'fast',
+    is_prenorm: bool = False
 ) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, dict]:
     """
     Joint sparse-quantization using SINQ methodology.
@@ -1383,10 +1406,15 @@ def sparse_quantize_sinq(
         use_compensation: Whether to use error compensation (SparseGPT-style)
         compensation_mode: Compensation method to use:
             - 'prism': PRISM (recommended) - sparse-aware Sinkhorn + iterative refinement
+            - 'prism_prenorm': PRISM for pre-norm architectures (OPT)
             - 'scab_opt': Iterative refinement with standard Sinkhorn
             - 'fast': Fast batch OBS compensation
             - 'mwc': μ-weighted compensation
             - 'iterative': Per-weight OBS compensation
+        is_prenorm: Whether the model uses pre-norm architecture (OPT).
+            Pre-norm models have LayerNorm before sublayer operations, causing
+            unnormalized activations that make Sinkhorn μ factors unreliable.
+            When True, PRISM uses simplified importance weighting.
 
     Returns:
         W_q: Quantized weights with sparsity applied
@@ -1469,9 +1497,15 @@ def sparse_quantize_sinq(
             # Best mode for joint pruning+quantization - uses sparse-aware Sinkhorn
             # Outperforms scab_opt by additional 3-10% through sparse-aware normalization
             W_compensated, mask, mu1, mu2 = sparse_with_prism(
-                W, activations, sparsity, n_iter=2
+                W, activations, sparsity, n_iter=2, is_prenorm=is_prenorm
             )
             # mu1, mu2 are computed using sparse-aware Sinkhorn (only on non-zero weights)
+        elif compensation_mode == 'prism_prenorm':
+            # PRISM variant for pre-norm architectures (OPT)
+            # Uses simplified importance weighting without μ factors
+            W_compensated, mask, mu1, mu2 = sparse_with_prism(
+                W, activations, sparsity, n_iter=2, is_prenorm=True
+            )
         else:  # iterative
             W_compensated, mask = sparse_with_compensation(
                 W, activations, importance, sparsity
