@@ -30,16 +30,16 @@
 OUTPUT_FILE="${OUTPUT_FILE:-rerun_c4.csv}"
 
 # Models to run
-models=("qwen-0.5b")
+models=("qwen-0.5b" "llama-7b" "opt-1.3b")
 
 # Techniques to run: fp16, sinq, sparsegpt, wanda, prism
-techniques=("prism")
+techniques=("prism" "fp16" "wanda" "sparsegpt" "sinq")
 
 # Precisions (used by sinq, sparsegpt, wanda, prism; ignored by fp16)
-precisions=("3")
+precisions=("3" "4" "5")
 
 # Sparsity levels (used by sparsegpt, wanda, prism; ignored by fp16, sinq)
-sparsities=("0.50")
+sparsities=("0.05" "0.25" "0.50")
 
 # Datasets to evaluate on
 datasets=("c4")
