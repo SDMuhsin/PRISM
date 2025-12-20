@@ -2369,36 +2369,54 @@ def run_benchmark(
 
 
 def save_result(result: Dict[str, Any], results_dir: Path):
-    """Save a single result to disk."""
+    """Save a single result to disk with file locking for concurrent access."""
     results_dir.mkdir(parents=True, exist_ok=True)
 
-    # Save individual result
-    filename = f"{result['model']}_{result['technique']}_{result['precision']}bit.json"
+    # Save individual result (include sparsity in filename for uniqueness)
+    sparsity_str = f"_sp{int(result.get('sparsity', 0) * 100)}" if result.get('sparsity') else ""
+    filename = f"{result['model']}_{result['technique']}_{result['precision']}bit{sparsity_str}.json"
     filepath = results_dir / filename
     with open(filepath, 'w') as f:
         json.dump(result, f, indent=2)
 
-    # Update consolidated results
+    # Update consolidated results with file locking
     consolidated_path = results_dir / 'all_results.json'
-    if consolidated_path.exists():
-        with open(consolidated_path, 'r') as f:
-            all_results = json.load(f)
-    else:
-        all_results = []
+    lock_path = results_dir / 'all_results.json.lock'
 
-    # Update or append result
-    key = (result['model'], result['technique'], result['precision'])
-    updated = False
-    for i, r in enumerate(all_results):
-        if (r['model'], r['technique'], r['precision']) == key:
-            all_results[i] = result
-            updated = True
-            break
-    if not updated:
-        all_results.append(result)
+    # Use a separate lock file for atomic read-modify-write
+    with open(lock_path, 'w') as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            # Read existing results
+            if consolidated_path.exists():
+                try:
+                    with open(consolidated_path, 'r') as f:
+                        all_results = json.load(f)
+                except json.JSONDecodeError:
+                    # File corrupted, start fresh
+                    all_results = []
+            else:
+                all_results = []
 
-    with open(consolidated_path, 'w') as f:
-        json.dump(all_results, f, indent=2)
+            # Update or append result (include sparsity in key)
+            key = (result['model'], result['technique'], result['precision'], result.get('sparsity', 0))
+            updated = False
+            for i, r in enumerate(all_results):
+                r_key = (r['model'], r['technique'], r['precision'], r.get('sparsity', 0))
+                if r_key == key:
+                    all_results[i] = result
+                    updated = True
+                    break
+            if not updated:
+                all_results.append(result)
+
+            # Write atomically via temp file
+            temp_path = consolidated_path.with_suffix('.json.tmp')
+            with open(temp_path, 'w') as f:
+                json.dump(all_results, f, indent=2)
+            temp_path.rename(consolidated_path)
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 # CSV column definitions for comprehensive result logging

@@ -40,6 +40,8 @@ ENV/
 results/
 logs/
 *.log
+*.lock
+*.tmp
 benchmark_all.log
 
 # Temp files
