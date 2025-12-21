@@ -2867,8 +2867,20 @@ Sparsity (--sparsity):
                        help='CSV filename for results (thread-safe, default: benchmark_results.csv)')
     parser.add_argument('--no-csv', action='store_true',
                        help='Disable CSV output')
+    parser.add_argument('--hf-token', type=str, default=None,
+                       help='HuggingFace access token for gated models/datasets')
 
     args = parser.parse_args()
+
+    # Login to HuggingFace if token provided
+    if args.hf_token:
+        try:
+            from huggingface_hub import login
+            login(token=args.hf_token, add_to_git_credential=False)
+            if not args.quiet:
+                print("Logged in to HuggingFace Hub")
+        except Exception as e:
+            print(f"Warning: HuggingFace login failed: {e}")
 
     # Parse arguments
     if args.model == 'all':

@@ -10,12 +10,32 @@
 #   - Dataset: wikitext2
 #
 # Usage:
-#   chmod +x sbatch/run_sparsity_ablation.sh
-#   ./sbatch/run_sparsity_ablation.sh
+#   ./sbatch/run_sparsity_ablation.sh                     # uses config below
+#   ./sbatch/run_sparsity_ablation.sh --hf-token TOKEN    # with HuggingFace token
 #
 # ============================================================================
 
 # Note: Don't use 'set -e' - it breaks ((job_count++)) when count is 0
+
+# ============================================================================
+# COMMAND LINE ARGUMENTS
+# ============================================================================
+
+HF_TOKEN=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --hf-token)
+            HF_TOKEN="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--hf-token TOKEN]"
+            exit 1
+            ;;
+    esac
+done
 
 # ============================================================================
 # CONFIGURATION
@@ -25,7 +45,7 @@
 MODEL="qwen-0.5b"
 
 # Sparsity levels: 5% to 95% in steps of 5%
-sparsities=("0.55" "0.60" "0.65" "0.70" "0.75" "0.80" "0.85" "0.90" "0.95") # ("0.05" "0.10" "0.15" "0.20" "0.25" "0.30" "0.35" "0.40" "0.45" "0.50" 
+sparsities=("0.05" "0.10" "0.15" "0.20" "0.25" "0.30" "0.35" "0.40" "0.45" "0.50")   #("0.55" "0.60" "0.65" "0.70" "0.75" "0.80" "0.85" "0.90" "0.95") # (
 
 # Precisions for quantized methods
 precisions=("3" "5")
@@ -77,6 +97,11 @@ submit_job() {
         python_cmd="python benchmarks/benchmark_suite.py --model $MODEL --technique $technique --precision 16 --sparsity $sparsity --dataset $DATASET --csv $CSV_FILE --quiet"
     else
         python_cmd="python benchmarks/benchmark_suite.py --model $MODEL --technique $technique --precision $precision --sparsity $sparsity --dataset $DATASET --csv $CSV_FILE --quiet"
+    fi
+
+    # Add HF token if provided
+    if [[ -n "$HF_TOKEN" ]]; then
+        python_cmd="$python_cmd --hf-token $HF_TOKEN"
     fi
 
     echo "  $job_name [Time: $time_limit]"
@@ -136,6 +161,11 @@ echo "Techniques: Wanda (no quant), SparseGPT (3,5-bit), PRISM (3,5-bit)"
 echo "Sparsities: 5% to 95% (step 5%)"
 echo "Dataset: $DATASET"
 echo "Output CSV: $CSV_FILE"
+if [[ -n "$HF_TOKEN" ]]; then
+    echo "HF Token: provided (${#HF_TOKEN} chars)"
+else
+    echo "HF Token: not provided"
+fi
 echo "============================================================================"
 echo ""
 

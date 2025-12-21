@@ -7,20 +7,40 @@
 # This script submits benchmark configurations based on the arrays below.
 # All execution is controlled by modifying the CONFIGURATION arrays.
 #
-# Techniques:
-#   - fp16:      FP16 baseline (no quantization, no sparsity)
-#   - sinq:      Quantization only (no sparsity)
-#   - sparsegpt: Sparse + Quantization
-#   - wanda:     Sparse + Quantization
-#   - prism:     Sparse-Aware Pruning + Quantization
+# Techniques (and what arrays they use):
+#   - fp16:      FP16 baseline                    [models, datasets]
+#   - sinq:      Quantization only                [models, precisions, datasets]
+#   - wanda:     Pruning only (no quantization)   [models, sparsities, datasets]
+#   - sparsegpt: Sparse + Quantization            [models, precisions, sparsities, datasets]
+#   - prism:     Sparse-Aware + Quantization      [models, precisions, sparsities, datasets]
 #
 # Usage:
-#   ./sbatch/run_all_experiments.sh                              # uses config below
-#   OUTPUT_FILE=my_results.csv ./sbatch/run_all_experiments.sh   # custom output
+#   ./sbatch/run_all_experiments.sh                     # uses config below
+#   ./sbatch/run_all_experiments.sh --hf-token TOKEN    # with HuggingFace token
 #
 # ============================================================================
 
 # Note: Don't use 'set -e' - it breaks ((job_count++)) when count is 0
+
+# ============================================================================
+# COMMAND LINE ARGUMENTS
+# ============================================================================
+
+HF_TOKEN=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --hf-token)
+            HF_TOKEN="$2"
+            shift 2
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo "Usage: $0 [--hf-token TOKEN]"
+            exit 1
+            ;;
+    esac
+done
 
 # ============================================================================
 # CONFIGURATION - Modify these arrays to control what runs
@@ -166,6 +186,11 @@ submit_job() {
         python_cmd="python benchmarks/benchmark_suite.py --model $model --technique $technique --precision $precision --dataset $dataset --csv $OUTPUT_FILE --quiet"
     fi
 
+    # Add HF token if provided
+    if [[ -n "$HF_TOKEN" ]]; then
+        python_cmd="$python_cmd --hf-token $HF_TOKEN"
+    fi
+
     echo "  $job_name [GPU: ${gpu_type%%:*}, Mem: $mem, Time: $time_limit]"
 
     sbatch \
@@ -211,28 +236,25 @@ submit_job() {
     ((job_count++))
 }
 
-# Check if a technique requires sparsity
-requires_sparsity() {
-    local technique=$1
-    case $technique in
-        "sparsegpt"|"wanda"|"prism")
-            return 0  # true - requires sparsity
-            ;;
-        *)
-            return 1  # false - no sparsity
-            ;;
-    esac
-}
-
-# Check if a technique requires precision loop
-requires_precision() {
+# Technique classification helpers
+# Returns: "none", "precision", "sparsity", "both"
+get_technique_type() {
     local technique=$1
     case $technique in
         "fp16")
-            return 1  # false - fixed at 16-bit
+            echo "none"        # No precision loop, no sparsity
+            ;;
+        "sinq")
+            echo "precision"   # Precision loop only
+            ;;
+        "wanda")
+            echo "sparsity"    # Sparsity loop only (pruning without quantization)
+            ;;
+        "sparsegpt"|"prism")
+            echo "both"        # Both precision and sparsity loops
             ;;
         *)
-            return 0  # true - needs precision
+            echo "both"        # Default to full loops
             ;;
     esac
 }
@@ -246,6 +268,11 @@ echo "SINQ Comprehensive Experiment Suite"
 echo "============================================================================"
 echo "Cluster: fir"
 echo "Output: ./results/${OUTPUT_FILE}"
+if [[ -n "$HF_TOKEN" ]]; then
+    echo "HF Token: provided (${#HF_TOKEN} chars)"
+else
+    echo "HF Token: not provided"
+fi
 echo "Models: ${models[*]}"
 echo "Techniques: ${techniques[*]}"
 echo "Precisions: ${precisions[*]}"
@@ -256,31 +283,41 @@ echo ""
 
 # Iterate through all combinations based on technique type
 for technique in "${techniques[@]}"; do
+    technique_type=$(get_technique_type "$technique")
+
     echo "=============================================="
-    echo "Submitting: ${technique^^} jobs"
+    echo "Submitting: ${technique^^} jobs (type: $technique_type)"
     echo "=============================================="
 
     for model in "${models[@]}"; do
         for dataset in "${datasets[@]}"; do
 
-            if [[ "$technique" == "fp16" ]]; then
-                # FP16: no precision loop, no sparsity
-                submit_job "$model" "fp16" "16" "" "$dataset"
-
-            elif ! requires_sparsity "$technique"; then
-                # SINQ: precision loop, no sparsity
-                for precision in "${precisions[@]}"; do
-                    submit_job "$model" "$technique" "$precision" "" "$dataset"
-                done
-
-            else
-                # Sparse methods: precision and sparsity loops
-                for precision in "${precisions[@]}"; do
-                    for sparsity in "${sparsities[@]}"; do
-                        submit_job "$model" "$technique" "$precision" "$sparsity" "$dataset"
+            case $technique_type in
+                "none")
+                    # FP16: no precision loop, no sparsity
+                    submit_job "$model" "$technique" "16" "" "$dataset"
+                    ;;
+                "precision")
+                    # SINQ: precision loop only
+                    for precision in "${precisions[@]}"; do
+                        submit_job "$model" "$technique" "$precision" "" "$dataset"
                     done
-                done
-            fi
+                    ;;
+                "sparsity")
+                    # Wanda: sparsity loop only (FP16 weights, no quantization)
+                    for sparsity in "${sparsities[@]}"; do
+                        submit_job "$model" "$technique" "16" "$sparsity" "$dataset"
+                    done
+                    ;;
+                "both")
+                    # SparseGPT/PRISM: both precision and sparsity loops
+                    for precision in "${precisions[@]}"; do
+                        for sparsity in "${sparsities[@]}"; do
+                            submit_job "$model" "$technique" "$precision" "$sparsity" "$dataset"
+                        done
+                    done
+                    ;;
+            esac
 
         done
     done
@@ -305,16 +342,25 @@ n_data=${#datasets[@]}
 
 echo "Job breakdown by technique:"
 for technique in "${techniques[@]}"; do
-    if [[ "$technique" == "fp16" ]]; then
-        count=$((n_models * n_data))
-        echo "  - ${technique}: $n_models models x $n_data datasets = $count jobs"
-    elif ! requires_sparsity "$technique"; then
-        count=$((n_models * n_prec * n_data))
-        echo "  - ${technique}: $n_models models x $n_prec precisions x $n_data datasets = $count jobs"
-    else
-        count=$((n_models * n_prec * n_sparse * n_data))
-        echo "  - ${technique}: $n_models models x $n_prec prec x $n_sparse sparsities x $n_data datasets = $count jobs"
-    fi
+    technique_type=$(get_technique_type "$technique")
+    case $technique_type in
+        "none")
+            count=$((n_models * n_data))
+            echo "  - ${technique}: $n_models models x $n_data datasets = $count jobs"
+            ;;
+        "precision")
+            count=$((n_models * n_prec * n_data))
+            echo "  - ${technique}: $n_models models x $n_prec precisions x $n_data datasets = $count jobs"
+            ;;
+        "sparsity")
+            count=$((n_models * n_sparse * n_data))
+            echo "  - ${technique}: $n_models models x $n_sparse sparsities x $n_data datasets = $count jobs"
+            ;;
+        "both")
+            count=$((n_models * n_prec * n_sparse * n_data))
+            echo "  - ${technique}: $n_models models x $n_prec prec x $n_sparse sparsities x $n_data datasets = $count jobs"
+            ;;
+    esac
 done
 
 echo ""
