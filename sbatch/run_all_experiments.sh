@@ -47,10 +47,10 @@ done
 # ============================================================================
 
 # Output CSV filename (results saved to ./results/${OUTPUT_FILE})
-OUTPUT_FILE="${OUTPUT_FILE:-rerun_c4.csv}"
+OUTPUT_FILE="${OUTPUT_FILE:-rerun_c4_v2.csv}"
 
 # Models to run
-models=("qwen-0.5b" "llama-7b" "opt-1.3b")
+models=("qwen-0.5b")
 
 # Techniques to run: fp16, sinq, sparsegpt, wanda, prism
 techniques=("prism" "fp16" "wanda" "sparsegpt" "sinq")
