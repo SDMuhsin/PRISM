@@ -50,7 +50,7 @@ done
 OUTPUT_FILE="${OUTPUT_FILE:-rerun_c4_v2.csv}"
 
 # Models to run
-models=("gemma-2b")
+models=("llama-7b")
 
 # Techniques to run: fp16, sinq, sparsegpt, wanda, prism
 techniques=("prism" "fp16" "wanda" "sparsegpt" "sinq")
@@ -113,7 +113,7 @@ get_job_config() {
             # ~7B params, needs full GPU
             gpu_type="h100:1"
             mem="64000M"
-            base_time_min=120
+            base_time_min=50
             ;;
         *)
             # Default fallback
