@@ -50,7 +50,7 @@ done
 OUTPUT_FILE="${OUTPUT_FILE:-rerun_c4_v2.csv}"
 
 # Models to run
-models=("qwen-0.5b")
+models=("gemma-2b")
 
 # Techniques to run: fp16, sinq, sparsegpt, wanda, prism
 techniques=("prism" "fp16" "wanda" "sparsegpt" "sinq")

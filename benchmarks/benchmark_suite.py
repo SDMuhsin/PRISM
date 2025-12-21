@@ -59,6 +59,8 @@ MODELS = {
     'opt-1.3b': 'facebook/opt-1.3b',
     'stablelm-2': 'stabilityai/stablelm-2-1_6b',
     'mistral-7b': 'mistralai/Mistral-7B-v0.1',
+    # Google Gemma family
+    'gemma-2b': 'google/gemma-2b',
 }
 
 TECHNIQUES = ['fp16', 'sinq', 'cpr-sinq', 'sinq-sparse', 'cpr-sparse', 'wanda', 'sparsegpt', 'scab', 'prism']
