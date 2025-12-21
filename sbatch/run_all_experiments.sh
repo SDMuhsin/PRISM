@@ -47,10 +47,10 @@ done
 # ============================================================================
 
 # Output CSV filename (results saved to ./results/${OUTPUT_FILE})
-OUTPUT_FILE="${OUTPUT_FILE:-rerun_c4_v2.csv}"
+OUTPUT_FILE="${OUTPUT_FILE:-wikitext_gemma.csv}"
 
 # Models to run
-models=("llama-7b")
+models=("gemma-2b")
 
 # Techniques to run: fp16, sinq, sparsegpt, wanda, prism
 techniques=("prism" "fp16" "wanda" "sparsegpt" "sinq")
@@ -62,7 +62,7 @@ precisions=("3" "4" "5")
 sparsities=("0.05" "0.25" "0.50")
 
 # Datasets to evaluate on
-datasets=("c4")
+datasets=("wikitext2")
 
 # ============================================================================
 # END CONFIGURATION
@@ -107,7 +107,7 @@ get_job_config() {
             # ~2B params
             gpu_type="nvidia_h100_80gb_hbm3_3g.40gb:1"
             mem="32000M"
-            base_time_min=50
+            base_time_min=25
             ;;
         "llama-7b")
             # ~7B params, needs full GPU
